@@ -29,7 +29,8 @@ jobs:
         run: |
           wget ${{ matrix.sdk_url_path }}/${{ matrix.sdk_file }} -O sdk.tar.xz
           tar -xf sdk.tar.xz
-          mv $(tar tf sdk.tar.xz | head -1 | cut -d/ -f1) openwrt-sdk
+          SDK_DIR=$(tar tf sdk.tar.xz | head -1 | cut -d/ -f1)
+          mv "$SDK_DIR" openwrt-sdk
 
       - name: Prepare SDK
         run: |
