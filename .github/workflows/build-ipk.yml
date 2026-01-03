@@ -1,4 +1,4 @@
-name: Build Release
+name: Build Release-pk
 
 on:
   push:
@@ -15,11 +15,11 @@ jobs:
         include:
           - arch: x86_64
             sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64
-            sdk_name: -sdk-23.05.5-x86-64_
+            sdk_file: openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
 
           - arch: mt7621
             sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7621
-            sdk_name: -sdk-23.05.5-ramips-mt7621_
+            sdk_file: openwrt-sdk-23.05.5-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz
 
     steps:
       - name: Checkout
@@ -27,9 +27,9 @@ jobs:
 
       - name: Download OpenWrt SDK
         run: |
-          wget ${ { matrix.sdk_url_path } }/openwrt${ { matrix.sdk_name } }gcc-12.3.0_musl.Linux-x86_64.tar.xz -O sdk.tar.xz
+          wget ${{ matrix.sdk_url_path }}/${{ matrix.sdk_file }} -O sdk.tar.xz
           tar -xf sdk.tar.xz
-          mv openwrt${ { matrix.sdk_name } }gcc-12.3.0_musl.Linux-x86_64 openwrt-sdk
+          mv $(tar tf sdk.tar.xz | head -1 | cut -d/ -f1) openwrt-sdk
 
       - name: Prepare SDK
         run: |
@@ -50,6 +50,10 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-xray-${{ matrix.arch }}
+          path: openwrt-sdk/bin/packages/**/luci-app-xray*.ipk
+
         with:
           name: luci-app-xray-${{ matrix.arch }}
           path: openwrt-sdk/bin/packages/**/luci-app-xray*.ipk
