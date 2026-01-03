@@ -1,131 +1,60 @@
-name: Build luci-app-xray for mipsel_24kc
+name: Build luci-app-xray IPK
 
 on:
   push:
-    tags:
-      - 'v*.*'
+    branches: [ main, master ]
+  pull_request:
+  release:
+    types: [ published ]
   workflow_dispatch:
-
-permissions:
-  contents: write
+  schedule:
+    - cron: '0 0 * * *'
 
 jobs:
   build:
-    name: Build for mipsel_24kc (OpenWrt 24.10.2)
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            build-essential ccache ecj fastjar file g++ gawk \
-            gettext git java-propose-classpath jq libelf-dev \
-            libncurses5-dev libncursesw5-dev libssl-dev python3 \
-            python3-distutils python3-setuptools rsync subversion \
-            swig time unzip wget xz-utils zlib1g-dev zstd
-
-      - name: Setup cache directories
-        run: |
-          mkdir -p ~/cache/{sdk,dl,feeds,ccache}
-          echo "CACHE_DIR=~/cache" >> $GITHUB_ENV
-          echo "CCACHE_DIR=~/cache/ccache" >> $GITHUB_ENV
-
-      - name: Cache SDK & downloads
-        uses: actions/cache@v4
         with:
-          path: |
-            ~/cache/sdk
-            ~/cache/dl
-            ~/cache/feeds
-            ~/cache/ccache
-          key: openwrt-sdk-24.10.2-mipsel_24kc-${{ hashFiles('package/luci-app-xray/Makefile') }}
-          restore-keys: |
-            openwrt-sdk-24.10.2-mipsel_24kc-
+          submodules: recursive
 
-      - name: Download and extract OpenWrt SDK
-        env:
-          SDK_VERSION: 24.10.2
-          TARGET: ramips/mt7621
-          SDK_FILENAME: openwrt-sdk-24.10.2-ramips-mt7621_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+      - name: Prepare package directory
         run: |
-          SDK_DIR="${CACHE_DIR}/sdk"
-          mkdir -p "$SDK_DIR"
-          cd "$SDK_DIR"
+          mkdir -p package/luci-app-xray
+          rsync -av \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='package/' \
+            --exclude='.gitattributes' \
+            --exclude='.gitignore' \
+            ./ package/luci-app-xray/
 
-          wget -q "https://downloads.openwrt.org/releases/${SDK_VERSION}/targets/${TARGET}/sha256sums"
+      - name: Build with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@main
+        with:
+          arch: ramips-mt7621
+          packages: luci-app-xray luci-compat
 
-          if ! grep -q "${SDK_FILENAME}" sha256sums; then
-            echo "Error: SDK file ${SDK_FILENAME} not found in sha256sums"
-            exit 1
-          fi
-
-          if [ ! -f "${SDK_FILENAME}" ] || ! sha256sum -c sha256sums --ignore-missing | grep "${SDK_FILENAME}"; then
-            wget -q "https://downloads.openwrt.org/releases/${SDK_VERSION}/targets/${TARGET}/${SDK_FILENAME}"
-            if ! sha256sum -c sha256sums --ignore-missing | grep "${SDK_FILENAME}"; then
-              echo "Error: SDK checksum verification failed!"
-              exit 1
-            fi
-          fi
-
-          echo "Extracting ${SDK_FILENAME}..."
-          tar --use-compress-program=zstd -xf "${SDK_FILENAME}" -C "${SDK_HOME:-/home/runner/work/sdk}" --strip-components=1
-          echo "SDK extracted successfully"
-
-      - name: Prepare OpenWrt SDK
-        env:
-          SDK_HOME: /home/runner/work/sdk
+      - name: Debug: List all generated IPK files
         run: |
-          cd "$SDK_HOME"
+          echo "=== ==="
+          find bin/packages -name "*.ipk" || echo ""
+          echo "=== ==="
+          tree bin/packages || find bin/packages -print
 
-          ln -sf "${CACHE_DIR}/dl" dl
-          ln -sf "${CACHE_DIR}/feeds" feeds
-
-          cat > feeds.conf <<EOF
-          src-git-full packages https://github.com/openwrt/packages.git
-          src-git-full luci https://github.com/openwrt/luci.git
-          src-git-full routing https://github.com/openwrt-routing/packages.git
-          src-git-full telephony https://github.com/openwrt/telephony.git
-          src-link luci-app-xray ${GITHUB_WORKSPACE}
-          EOF
-
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Build luci-app-xray
-        env:
-          SDK_HOME: /home/runner/work/sdk
-        run: |
-          cd "$SDK_HOME"
-          make defconfig
-          make package/luci-app-xray/clean V=s
-          make package/luci-app-xray/compile V=s -j$(nproc)
-          find bin/packages/ -name "*.ipk" -exec ls -lh {} \;
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          find /home/runner/work/sdk/bin/ -name "*.ipk" -exec cp {} artifacts/ \;
-          ls -lh artifacts/
-
-      - name: Upload artifact (for download)
+      - name: Upload IPK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-xray-mipsel_24kc
-          path: artifacts/*.ipk
-          if-no-files-found: error
+          name: luci-app-xray-ipk
+          path: bin/packages/ramips/mt7621/packages/*.ipk
+          retention-days: 30
+          if-no-files-found: warn
+          compression-level: 6
 
-      - name: Create GitHub Release (only on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Upload IPK to GitHub Release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.ipk
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            Auto-built luci-app-xray for mipsel_24kc (OpenWrt 24.10.2)
-            Triggered by tag: ${{ github.ref_name }}
+          files: bin/packages/ramips/mt7621/packages/*.ipk
+          fail_on_unmatched_files: false
